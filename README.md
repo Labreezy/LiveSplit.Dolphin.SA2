@@ -1,6 +1,6 @@
-# sonic-suggests-autosplitter
+# Livesplit.Dolphin.SA2
 
-An auto splitter for Sonic Suggests (v1.2+).
+An auto splitter for SA2B in Dolphin (NTSC-U).
 
 ## Compilation
 

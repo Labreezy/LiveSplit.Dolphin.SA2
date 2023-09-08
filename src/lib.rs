@@ -11,11 +11,12 @@ asr::panic_handler!();
 
 use asr::{Address,
     future::{next_tick, sleep}, 
-    user_settings::Settings
+    user_settings::Settings,
     signature::Signature, Process};
+use bytemuck::CheckedBitPattern;
 
 use core::{time::Duration};
-
+use core::cmp::min;
 mod state;
 
 #[derive(Settings)]
@@ -26,8 +27,8 @@ struct Settings {
    
 }
 
-const GC_SIG : Signature<8> = Signature::new(
-    "47 53 4E 45 38 50 00 00"
+const GC_SIG : Signature<10> = Signature::new(
+    "47 53 4E 45 38 50 00 00 01 00"
 );
 
 macro_rules! unwrap_or_continue {
@@ -57,7 +58,7 @@ async fn main() {
                 }
                 loop {
                     // TODO: Do something on every tick.
-                    let 
+                        
                     next_tick().await;
                     break;
                 }
@@ -68,8 +69,9 @@ async fn main() {
 
 fn get_gc_base(proc: &Process) -> Option<Address> {
     for range in proc.memory_ranges() {
-        if let (Ok(address), Ok(_size)) = (range.address(), range.size()) {
-            let base_addr = GC_SIG.scan_process_range(proc, (address, 0x100)); //guaranteed to be within the first few bytes of a region
+        if let (Ok(address), Ok(size)) = (range.address(), range.size()) {
+            asr::print_limited::<32>(&format_args!("0x{:x}", address.value())); 
+            let base_addr = GC_SIG.scan_process_range(proc, (address, size)); //guaranteed to be within the first few bytes of a region
             if base_addr.is_some() {
                 return base_addr;
             }
@@ -79,6 +81,10 @@ fn get_gc_base(proc: &Process) -> Option<Address> {
     None
 }
 
-fn read_dolphin<T>(proc: &Process, base: Address, offset: u32){
-    
+fn read_dolphin<T: CheckedBitPattern+Default>(proc: &Process, base: Address, mut offset: u32) -> T{
+    if offset > 0x4000000 {
+        offset = offset & 0xFFFFFF;
+    }
+    let target_address : Address = base.add(offset as u64);
+    proc.read::<T>(target_address).ok().unwrap_or_default()
 }
