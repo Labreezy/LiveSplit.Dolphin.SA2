@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-asr = { git = "https://github.com/LiveSplit/asr", features = [
+asr = { git = "https://github.com/Jujstme/asr", features = [
     # "alloc", # Working with allocations.
     "derive", # Defining your own settings structs and converting endianness.
     # "flags", # Working with bit flags.
@@ -15,6 +15,7 @@ asr = { git = "https://github.com/LiveSplit/asr", features = [
     # "integer-vars", # Setting integer variables.
     "signature", # Scanning signatures.
     # "gba", # Accessing Game Boy Advance emulators.
+    "gcn" # Accessing Gamecube emulators.
     # "genesis", # Accessing Genesis emulators.
     # "ps1", # Accessing PlayStation emulators.
 ] }
