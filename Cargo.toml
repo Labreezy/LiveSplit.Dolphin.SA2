@@ -24,7 +24,7 @@ asr = { git = "https://github.com/Jujstme/asr", features = [
 bytemuck = { version = "1", features = ["derive", "min_const_generics"] }
 
 arrayvec = { version = "0.7.4", default-features = false }
-bitflags = "2.3.3"
+bitflags = "2.4.0"
 numtoa = "0.2.4"
 
 # This fixes memcmp not being exported to the wasi environment in no_std mode

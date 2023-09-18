@@ -11,17 +11,22 @@
 
 use core::cmp::max;
 
+
 use asr::{
     print_limited,
     emulator::gcn::{self, Emulator},
     future::{next_tick, retry},
-    watcher::Watcher, timer::{self, TimerState}, time::Duration, time_util::frame_count, print_message,
+    watcher::Watcher, timer::{self, TimerState}, time::Duration, time_util::frame_count, print_message, Address32, Address,
 };
 use asr::time_util;
+
+use bitflags::bitflags;
 
 asr::panic_handler!();
 asr::async_main!(nightly);
 
+
+const POWERUP_DEAD : u16 = 0x4000;
 
 
 async fn main() {
@@ -53,18 +58,25 @@ async fn main() {
                     
 
                     if let Some(game_time) = game_time(&watchers, &settings, &mut igt_info) {
-                        print_message("gaming time");
+                        
                         timer::set_game_time(game_time)
                     }
 
                     if reset(&watchers, &settings) {
-                        timer::reset()
+                        timer::reset();
+
+
+                        
                     } else if split(&watchers, &settings) {
                         timer::split()
                     }
                 }
 
                 if timer::state() == TimerState::NotRunning && start(&watchers, &settings) {
+                    igt_info = IGTInfo::default();
+                    igt_info.igt_frames = 0;
+                    igt_info.last_timer = 0;
+                    igt_info.igt_duration = Duration::seconds(0);
                     timer::start();
                     timer::pause_game_time();
 
@@ -86,56 +98,60 @@ struct Settings {
 struct IGTInfo {
     igt_frames: u64,
     igt_duration: Duration,
+    last_timer: u32,
 }
 #[derive(Default)]
 struct Watchers {
-    level_timer_mins: Watcher<u8>,
-    level_timer_secs: Watcher<u8>,
-    level_timer_centis: Watcher<u8>,
+    level_timer: Watcher<u32>,
     frame_counter: Watcher<u32>,
     gamestate_flags: Watcher<u8>,
+    powerups_bitfield: Watcher<u16>,
+    can_control_p1: Watcher<u8>,
 }
 
 struct Offsets {
-    level_timer_mins: u32,
-    level_timer_secs: u32,
-    level_timer_centis: u32,
+    level_timer: u32,
     frame_counter: u32,
     gamestate_flags: u32,
+    p1_region: u32,
+    powerup_offset: u8,
+    can_control_p1: u32,
 }
 
 impl Offsets {
     fn new() -> Self {
         Self {
-            level_timer_mins: 0x1B3D2F,
-            level_timer_secs: 0x1B3D6F,
-            level_timer_centis: 0x1B3DAF,
+            level_timer: 0x1CC182,
             frame_counter: 0x1CC1E0,
             gamestate_flags: 0x3AD81B,
+            p1_region: 0x1E7728, 
+            powerup_offset: 0x10,
+            can_control_p1: 0x1CC1A7,
         }
     }
 }
 
 
 fn update_loop(game: &Emulator, offsets: &Offsets, watchers: &mut Watchers) {
-    let timer_minutes = game.read::<u8>(offsets.level_timer_mins).unwrap_or_default();
-    let timer_seconds = game.read::<u8>(offsets.level_timer_secs).unwrap_or_default();
-    let timer_centis = game.read::<u8>(offsets.level_timer_centis).unwrap_or_default();
+    let level_timer = game.read::<u32>(offsets.level_timer).unwrap_or_default();
     let fc = game.read::<u32>(offsets.frame_counter).unwrap_or_default();
     let stateflags = game.read::<u8>(offsets.gamestate_flags).unwrap_or_default();
-    
-    watchers.level_timer_mins.update_infallible(timer_minutes);
-    watchers.level_timer_secs.update_infallible(timer_seconds);
-    watchers.level_timer_centis.update_infallible(timer_centis);
+    let controlp1 = game.read::<u8>(offsets.can_control_p1).unwrap_or_default();
+    watchers.level_timer.update_infallible(level_timer);
     watchers.frame_counter.update_infallible(fc);
     watchers.gamestate_flags.update_infallible(stateflags);
+    watchers.can_control_p1.update_infallible(controlp1);
+    let p1_region_base = game.read::<u32>(offsets.p1_region).unwrap_or_default();
+    
+    if p1_region_base > 0x8000000 {
+        let powerups = game.read::<u16>(p1_region_base + offsets.powerup_offset as u32).unwrap_or_default();
+        watchers.powerups_bitfield.update_infallible(powerups);
+    }
+
 }
     
 
 fn start(watchers: &Watchers, settings: &Settings) -> bool {
-    if !settings.start {
-        return false;
-    }
     false
 }
 
@@ -153,24 +169,36 @@ fn is_loading(watchers: &Watchers, settings: &Settings) -> Option<bool> {
 
 fn game_time(watchers: &Watchers, settings: &Settings, info: &mut IGTInfo) -> Option<Duration> {
     let mut countFrames = false;
-    let mut igt = frame_count::<60>(info.igt_frames);
+    
 
-    let Some(minutes) = watchers.level_timer_mins.pair else {return Some(igt)};
-    let Some(seconds) = watchers.level_timer_secs.pair else {return Some(igt)};
-    let Some(centis) = watchers.level_timer_centis.pair else {return Some(igt)};
-    let Some(fcount) = watchers.frame_counter.pair else {return Some(igt)};
-    let Some(flags) = watchers.gamestate_flags.pair else {return Some(igt)};
-    if seconds.changed()|| minutes.changed() || centis.changed(){
+    let Some(leveltime) = watchers.level_timer.pair else {return None};
+    let Some(fcount) = watchers.frame_counter.pair else {return None};
+    let Some(flags) = watchers.gamestate_flags.pair else {return None};
+    let Some(powerups) = watchers.powerups_bitfield.pair else {return None};
+    let Some(controlp1) = watchers.can_control_p1.pair else {return None};
+
+    if flags.current == 16 {
+     //ingame
+        if (powerups.current & POWERUP_DEAD) == POWERUP_DEAD { //if you're dead don't count frames
+            countFrames = false;
+            
+        } else {
         countFrames = true;
-    }  else if flags.current == 17 || flags.current == 16 { //paused but ingame, ingame
+        }
+    } else if flags.current == 17 { //ingame but paused
         countFrames = true;
+        
+    } else {
+        countFrames = false;
     }
     let framesToAdd : u32;
     if countFrames {
-        framesToAdd = max(fcount.current - fcount.old, 0);
-        info.igt_frames = info.igt_frames + (framesToAdd as u64);
+            if leveltime.current > 2  { //dont fucking ask
+                framesToAdd = max(fcount.current - fcount.old, 0);
+                info.igt_frames = info.igt_frames + (framesToAdd as u64);
+                info.igt_duration = frame_count::<60>(info.igt_frames);
+            }
     }
-    igt = frame_count::<60>(info.igt_frames);
-    info.igt_duration = igt;
-    Some(igt)
+    Some(info.igt_duration)
+    
 }
