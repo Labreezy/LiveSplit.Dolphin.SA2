@@ -1,6 +1,15 @@
 # Livesplit.Dolphin.SA2
 
-An auto splitter for SA2B in Dolphin (NTSC-U).
+An auto splitter for Sonic Adventure 2: Battle played with Dolphin (NTSC-U).
+
+
+##Usage
+
+First, make sure the PC autosplitter for SA2 is deactivated.
+
+Then, right click on livesplit -> Edit Layout -> + -> Control -> Auto Splitting Runtime and browse for the .wasm file in the releases tab.  
+
+Starting, splitting, and resetting are all manual for now and menus are *untimed* so keep that in mind.
 
 ## Compilation
 
