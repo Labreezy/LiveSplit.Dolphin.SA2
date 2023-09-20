@@ -27,7 +27,7 @@ asr::async_main!(nightly);
 
 
 const POWERUP_DEAD : u16 = 0x4000;
-// const BOSSES : [u8] = [67, 65, 64, 63, 62, 61, 60, 33, 29, 20, 19, 42, 33];
+const VALID_CENTIS : [f64; 6] = [0.,0.02,0.04,0.05,0.07,0.09];
 
 async fn main() {
     let settings = Settings::register();
@@ -99,6 +99,7 @@ struct IGTInfo {
     igt_frames: u64,
     igt_duration: Duration,
     last_timer: [u8;3],
+    paused_frames: u64,
 }
 #[derive(Default)]
 struct Watchers {
@@ -173,8 +174,18 @@ fn reset(watchers: &Watchers, settings: &Settings) -> bool {
     false
 }
 
-fn is_loading(watchers: &Watchers, settings: &Settings) -> Option<bool> {
+fn is_loading(watchers: &Watchers, settings: &Settings) -> Option<bool> {                                                       
     Some(true)
+}
+
+fn to_sa2_ms(frames : u64) -> Duration {
+    let subsecond_frames = frames % 60;
+    let seconds = (frames - subsecond_frames)/60;
+    let deciseconds = subsecond_frames/6;
+    let centiseconds = VALID_CENTIS[(subsecond_frames as usize % 6)]; //i fuckin hate sa2 rounding
+    let total_time = Duration::seconds_f64(seconds as f64 + deciseconds as f64/10.0 + centiseconds);
+    print_limited::<32>(&format_args!("igt: {:.2}", total_time));
+    return total_time
 }
 
 fn game_time(watchers: &Watchers, settings: &Settings, info: &mut IGTInfo) -> Option<Duration> {
@@ -187,19 +198,11 @@ fn game_time(watchers: &Watchers, settings: &Settings, info: &mut IGTInfo) -> Op
     let Some(flags) = watchers.gamestate_flags.pair else {return None};
     let Some(powerups) = watchers.powerups_bitfield.pair else {return None};
     let Some(controlp1) = watchers.can_control_p1.pair else {return None};
-
-    if flags.current == 17 { //ingame but paused
-        countFrames = true;
-        
-    } else {
-        countFrames = false;
-    }
     let framesToAdd : u32;
-    if countFrames {
+    if flags.current == 17 {
             if leveltime.current > 2  { //dont fucking @ me
                 framesToAdd = max(fcount.current - fcount.old, 0);
-                info.igt_frames = info.igt_frames + (framesToAdd as u64);
-                info.igt_duration = frame_count::<60>(info.igt_frames);
+                info.paused_frames = info.paused_frames + (framesToAdd as u64);
             }
     } else if flags.current == 16 && leveltime2.changed() {
         print_limited::<32>(&format_args!("{:x}",leveltime2.current));
@@ -213,10 +216,9 @@ fn game_time(watchers: &Watchers, settings: &Settings, info: &mut IGTInfo) -> Op
         let old_igt = old_mins * 3600 + old_secs * 60 + old_frames;
         let igt_diff : i32 = (curr_igt - old_igt) as i32;
         framesToAdd = max(igt_diff,0) as u32; //only positive igt
-        print_limited::<64>(&format_args!("Frames to add: {}",framesToAdd));
         info.igt_frames += framesToAdd as u64;
-        info.igt_duration = frame_count::<60>(info.igt_frames);
     }
-    Some(info.igt_duration)
+    let total_igt = to_sa2_ms(info.igt_frames) + frame_count::<60>(info.paused_frames);
+    Some(total_igt)
     
 }
