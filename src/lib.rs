@@ -27,7 +27,7 @@ asr::async_main!(nightly);
 
 
 const POWERUP_DEAD : u16 = 0x4000;
-// const BOSSES : [u8] = [67, 65, 64, 63, 62, 61, 60, 33, 29, 20, 19, 42, 33];
+const VALID_IGT_CENTIS : [i8; 6] = [0,2,4,5,7,9];
 
 async fn main() {
     let settings = Settings::register();
@@ -43,7 +43,7 @@ async fn main() {
         loop {
             if !emulator.is_open() {
 
-                break;
+                break
             }
             if emulator.update() {
                 // Splitting logic. Adapted from OG LiveSplit:
@@ -98,6 +98,7 @@ struct Settings {
 struct IGTInfo {
     igt_frames: u64,
     igt_duration: Duration,
+    pause_frames: u64,
     last_timer: [u8;3],
 }
 #[derive(Default)]
@@ -188,20 +189,15 @@ fn game_time(watchers: &Watchers, settings: &Settings, info: &mut IGTInfo) -> Op
     let Some(powerups) = watchers.powerups_bitfield.pair else {return None};
     let Some(controlp1) = watchers.can_control_p1.pair else {return None};
 
-    if flags.current == 17 { //ingame but paused
-        countFrames = true;
-        
-    } else {
-        countFrames = false;
-    }
     let framesToAdd : u32;
-    if countFrames {
+    if flags.current == 17 {
             if leveltime.current > 2  { //dont fucking @ me
                 framesToAdd = max(fcount.current - fcount.old, 0);
-                info.igt_frames = info.igt_frames + (framesToAdd as u64);
-                info.igt_duration = frame_count::<60>(info.igt_frames);
+                info.pause_frames = info.pause_frames + (framesToAdd as u64);
+                
             }
-    } else if flags.current == 16 && leveltime2.changed() {
+    } else if flags.current == 16 && leveltime2.changed() && leveltime2.current >= 1 { //fuck if i know why 1 is the magic number but here we are
+
         print_limited::<32>(&format_args!("{:x}",leveltime2.current));
         let mins_frames = (leveltime2.current >> 0x10) & 0xFF;
         let secs_frames = (leveltime2.current >> 8) & 0xFF;
@@ -212,11 +208,25 @@ fn game_time(watchers: &Watchers, settings: &Settings, info: &mut IGTInfo) -> Op
         let old_frames = (leveltime2.old) & 0xFF;
         let old_igt = old_mins * 3600 + old_secs * 60 + old_frames;
         let igt_diff : i32 = (curr_igt - old_igt) as i32;
-        framesToAdd = max(igt_diff,0) as u32; //only positive igt
-        print_limited::<64>(&format_args!("Frames to add: {}",framesToAdd));
-        info.igt_frames += framesToAdd as u64;
-        info.igt_duration = frame_count::<60>(info.igt_frames);
+        let mut deciseconds = 0;
+        if igt_diff >= 6 {
+            deciseconds = igt_diff/6;
+        }
+        if igt_diff > 0 { //only positive igt changes affect the timer
+            let old_centis_digit = VALID_IGT_CENTIS[(old_frames % 6) as usize];
+            let curr_centis_digit = VALID_IGT_CENTIS[(centis_frames % 6) as usize];
+            let mut centis_diff = curr_centis_digit - old_centis_digit;
+            if centis_diff < 0 {
+                centis_diff += 10;
+            }
+            print_limited::<32>(&format_args!("Centi diff: {}", centis_diff));
+            info.igt_duration += Duration::milliseconds(10 * centis_diff as i64);
+            info.igt_duration += Duration::milliseconds(100 * deciseconds as i64);      
+
+        }        
     }
-    Some(info.igt_duration)
+    
+    let total_igt = info.igt_duration + frame_count::<60>(info.pause_frames);
+    Some(total_igt)
     
 }
