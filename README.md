@@ -2,6 +2,19 @@
 
 An auto splitter for SA2B in Dolphin (NTSC-U).
 
+## Usage:
+
+Download the .wasm file from the releases tab.
+
+Right click your livesplit -> Edit Layout -> + -> Control -> Auto splitting Runtime (If you don't see it, update your livesplit.)
+
+Browse for your newly downloaded .wasm file.
+
+Deactivate the current PC SA2B Autosplitter (right click -> edit splits -> deactivate)
+
+Enjoy!
+
+
 ## Compilation
 
 This auto splitter is written in Rust. In order to compile it, you need to
